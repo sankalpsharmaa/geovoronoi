@@ -526,3 +526,67 @@ def points_to_region(region_pts):
             pts_region[pt] = poly
 
     return pts_region
+
+def create_thiessens(points, polygons, point_var, within_id):
+
+'''
+Wrapper function for geovoronoi to create thiessen polygons within multiple geometries and return the output in a dataframe.
+Point and polygon geometries are confined using within_id, which can be a geographic identifier.
+If point geometries are not confined within corresponding polygons, the function will not work.
+Use a spatial join prior to running this function to confirm that all point geometries lie within bounding polygons.
+:param points: a geodataframe consisting of points around which thiessens will be constructed
+:param polygons: a geodataframe consisting of polygons which will bound the thiessen polygon growth 
+:param point_var: variable name for point in the points geodataframe
+:param within_id: variable name for the location identifier which constrains the set of points within one polygon geometry
+'''
+    # dataframe for point geometries
+    df_points = points
+    
+    # dataframe for bounding polygon geometries
+    df_polygons = polygons
+
+    # generate point geometry variable
+    df_points["geometry"] = df_points[point_var]
+    
+    # extract latitude and longitude of point geometry
+    df_points["lat"] = gpd.GeoSeries(df_points["geometry"]).y
+    df_points["lon"] = gpd.GeoSeries(df_points["geometry"]).x
+    
+    # create a counter variable to loop over bounding polygon geometries
+    poly_counter = list(range(len(df_polygons)))
+    
+    # create a dict container to store thiessen polygon output mapped to their corresponding point geometries
+    gpd_input_dict= {
+                'x': [],
+                'y': [],
+                'geometry': []
+            }
+    
+    # now, loop over each bounding polygon
+    for i in poly_counter:
+        
+        # subset the location identifier of the bounding polygon in a list
+        identifier = list(df_polygons[[within_id]].iloc[i])
+        
+        # isolate the subset of point geometries that lie within the location identified above
+        coords = df_points[(df_points[within_id] == identifier[0])]
+        
+        # only create thiessen polygons if more than 1 point geometries lie within the bounding polygon
+        if len(coords) > 1:
+            
+            # convert lat/long to numpy array
+            coords = coords[["lon", "lat"]].values
+
+            # generate thiessen polygons
+            region_polys, region_pts = voronoi_regions_from_coords(coords, df_polygons["geometry"].iloc[i])
+
+            # convert output dict to dataframe consisting of centroid lat/lon and corresponding thiessen polygon
+            for pt, poly in region_pts.items():
+                gpd_input_dict['x'] += [coords[poly[0]][0]]
+                gpd_input_dict['y'] += [coords[poly[0]][1]]
+                gpd_input_dict['geometry'] += [region_polys[pt]]
+            
+            # append output to geodataframe
+            vor = gpd.GeoDataFrame(gpd_input_dict)
+    
+    return vor
